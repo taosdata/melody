@@ -180,7 +180,7 @@ func (m *Melody) HandleRequestWithKeys(w http.ResponseWriter, r *http.Request, k
 		output:  make(chan *envelope, m.Config.MessageBufferSize),
 		melody:  m,
 		open:    true,
-		rwmutex: &sync.RWMutex{},
+		rwMutex: &sync.RWMutex{},
 	}
 
 	m.hub.register <- session

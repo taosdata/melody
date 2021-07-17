@@ -17,7 +17,7 @@ type Session struct {
 	output  chan *envelope
 	melody  *Melody
 	open    bool
-	rwmutex *sync.RWMutex
+	rwMutex *sync.RWMutex
 }
 
 func (s *Session) writeMessage(message *envelope) {
@@ -25,12 +25,12 @@ func (s *Session) writeMessage(message *envelope) {
 		s.melody.errorHandler(s, errors.New("tried to write to closed a session"))
 		return
 	}
-
-	select {
-	case s.output <- message:
-	default:
-		s.melody.errorHandler(s, errors.New("session message buffer is full"))
-	}
+	defer func() {
+		if recover() != nil {
+			//并发情况下 s.output 已经关闭则会产生 panic
+		}
+	}()
+	s.output <- message
 }
 
 func (s *Session) writeRaw(message *envelope) error {
@@ -38,7 +38,7 @@ func (s *Session) writeRaw(message *envelope) error {
 		return errors.New("tried to write to a closed session")
 	}
 
-	s.conn.SetWriteDeadline(time.Now().Add(s.melody.Config.WriteWait))
+	_ = s.conn.SetWriteDeadline(time.Now().Add(s.melody.Config.WriteWait))
 	err := s.conn.WriteMessage(message.t, message.msg)
 
 	if err != nil {
@@ -49,24 +49,21 @@ func (s *Session) writeRaw(message *envelope) error {
 }
 
 func (s *Session) closed() bool {
-	s.rwmutex.RLock()
-	defer s.rwmutex.RUnlock()
-
 	return !s.open
 }
 
 func (s *Session) close() {
 	if !s.closed() {
-		s.rwmutex.Lock()
+		s.rwMutex.Lock()
 		s.open = false
-		s.conn.Close()
+		_ = s.conn.Close()
 		close(s.output)
-		s.rwmutex.Unlock()
+		s.rwMutex.Unlock()
 	}
 }
 
 func (s *Session) ping() {
-	s.writeRaw(&envelope{t: websocket.PingMessage, msg: []byte{}})
+	_ = s.writeRaw(&envelope{t: websocket.PingMessage, msg: []byte{}})
 }
 
 func (s *Session) writePump() {
