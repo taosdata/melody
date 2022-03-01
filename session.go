@@ -4,19 +4,25 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
+const (
+	StatusNormal = uint32(1)
+	StatusStop   = uint32(2)
+)
+
 // Session wrapper around websocket connections.
 type Session struct {
 	Request *http.Request
-	Keys    map[string]interface{}
+	Keys    sync.Map
 	conn    *websocket.Conn
 	output  chan *envelope
 	melody  *Melody
-	open    bool
+	status  uint32
 	rwMutex *sync.RWMutex
 }
 
@@ -27,7 +33,7 @@ func (s *Session) writeMessage(message *envelope) {
 	}
 	defer func() {
 		if recover() != nil {
-			//并发情况下 s.output 已经关闭则会产生 panic
+			s.melody.errorHandler(s, errors.New("tried to write to closed a session"))
 		}
 	}()
 	s.output <- message
@@ -49,13 +55,13 @@ func (s *Session) writeRaw(message *envelope) error {
 }
 
 func (s *Session) closed() bool {
-	return !s.open
+	return atomic.LoadUint32(&s.status) == StatusStop
 }
 
 func (s *Session) close() {
 	if !s.closed() {
 		s.rwMutex.Lock()
-		s.open = false
+		atomic.StoreUint32(&s.status, StatusStop)
 		_ = s.conn.Close()
 		close(s.output)
 		s.rwMutex.Unlock()
@@ -69,24 +75,22 @@ func (s *Session) ping() {
 func (s *Session) writePump() {
 	ticker := time.NewTicker(s.melody.Config.PingPeriod)
 	defer ticker.Stop()
-
-loop:
 	for {
 		select {
 		case msg, ok := <-s.output:
 			if !ok {
-				break loop
+				return
 			}
 
 			err := s.writeRaw(msg)
 
 			if err != nil {
 				s.melody.errorHandler(s, err)
-				break loop
+				return
 			}
 
 			if msg.t == websocket.CloseMessage {
-				break loop
+				return
 			}
 
 			if msg.t == websocket.TextMessage {
@@ -184,21 +188,13 @@ func (s *Session) CloseWithMsg(msg []byte) error {
 // Set is used to store a new key/value pair exclusivelly for this session.
 // It also lazy initializes s.Keys if it was not used previously.
 func (s *Session) Set(key string, value interface{}) {
-	if s.Keys == nil {
-		s.Keys = make(map[string]interface{})
-	}
-
-	s.Keys[key] = value
+	s.Keys.Store(key, value)
 }
 
 // Get returns the value for the given key, ie: (value, true).
 // If the value does not exists it returns (nil, false)
 func (s *Session) Get(key string) (value interface{}, exists bool) {
-	if s.Keys != nil {
-		value, exists = s.Keys[key]
-	}
-
-	return
+	return s.Keys.Load(key)
 }
 
 // MustGet returns the value for the given key if it exists, otherwise it panics.

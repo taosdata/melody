@@ -8,45 +8,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Close codes defined in RFC 6455, section 11.7.
-// Duplicate of codes from gorilla/websocket for convenience.
-const (
-	CloseNormalClosure           = 1000
-	CloseGoingAway               = 1001
-	CloseProtocolError           = 1002
-	CloseUnsupportedData         = 1003
-	CloseNoStatusReceived        = 1005
-	CloseAbnormalClosure         = 1006
-	CloseInvalidFramePayloadData = 1007
-	ClosePolicyViolation         = 1008
-	CloseMessageTooBig           = 1009
-	CloseMandatoryExtension      = 1010
-	CloseInternalServerErr       = 1011
-	CloseServiceRestart          = 1012
-	CloseTryAgainLater           = 1013
-	CloseTLSHandshake            = 1015
-)
-
-// Duplicate of codes from gorilla/websocket for convenience.
-var validReceivedCloseCodes = map[int]bool{
-	// see http://www.iana.org/assignments/websocket/websocket.xhtml#close-code-number
-
-	CloseNormalClosure:           true,
-	CloseGoingAway:               true,
-	CloseProtocolError:           true,
-	CloseUnsupportedData:         true,
-	CloseNoStatusReceived:        false,
-	CloseAbnormalClosure:         false,
-	CloseInvalidFramePayloadData: true,
-	ClosePolicyViolation:         true,
-	CloseMessageTooBig:           true,
-	CloseMandatoryExtension:      true,
-	CloseInternalServerErr:       true,
-	CloseServiceRestart:          true,
-	CloseTryAgainLater:           true,
-	CloseTLSHandshake:            false,
-}
-
 type handleMessageFunc func(*Session, []byte)
 type handleErrorFunc func(*Session, error)
 type handleCloseFunc func(*Session, int, string) error
@@ -56,7 +17,7 @@ type filterFunc func(*Session) bool
 // Melody implements a websocket manager.
 type Melody struct {
 	Config                   *Config
-	Upgrader                 *websocket.Upgrader
+	UpGrader                 *websocket.Upgrader
 	messageHandler           handleMessageFunc
 	messageHandlerBinary     handleMessageFunc
 	messageSentHandler       handleMessageFunc
@@ -69,11 +30,12 @@ type Melody struct {
 	hub                      *hub
 }
 
-// New creates a new melody instance with default Upgrader and Config.
+// New creates a new melody instance with default UpGrader and Config.
 func New() *Melody {
-	upgrader := &websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
+	upGrader := &websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		WriteBufferPool: &sync.Pool{},
 		CheckOrigin:     func(r *http.Request) bool { return true },
 	}
 
@@ -83,7 +45,7 @@ func New() *Melody {
 
 	return &Melody{
 		Config:                   newConfig(),
-		Upgrader:                 upgrader,
+		UpGrader:                 upGrader,
 		messageHandler:           func(*Session, []byte) {},
 		messageHandlerBinary:     func(*Session, []byte) {},
 		messageSentHandler:       func(*Session, []byte) {},
@@ -167,7 +129,7 @@ func (m *Melody) HandleRequestWithKeys(w http.ResponseWriter, r *http.Request, k
 		return errors.New("melody instance is closed")
 	}
 
-	conn, err := m.Upgrader.Upgrade(w, r, w.Header())
+	conn, err := m.UpGrader.Upgrade(w, r, w.Header())
 
 	if err != nil {
 		return err
@@ -175,14 +137,15 @@ func (m *Melody) HandleRequestWithKeys(w http.ResponseWriter, r *http.Request, k
 
 	session := &Session{
 		Request: r,
-		Keys:    keys,
 		conn:    conn,
 		output:  make(chan *envelope, m.Config.MessageBufferSize),
 		melody:  m,
-		open:    true,
+		status:  StatusNormal,
 		rwMutex: &sync.RWMutex{},
 	}
-
+	for k, v := range keys {
+		session.Keys.Store(k, v)
+	}
 	m.hub.register <- session
 
 	m.connectHandler(session)

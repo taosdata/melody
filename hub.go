@@ -2,46 +2,49 @@ package melody
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
+var nodata = struct{}{}
+
 type hub struct {
-	sessions   map[*Session]bool
+	sessions   map[*Session]struct{}
 	broadcast  chan *envelope
 	register   chan *Session
 	unregister chan *Session
 	exit       chan *envelope
+	status     uint32
 	open       bool
-	rwmutex    *sync.RWMutex
+	rwMutex    *sync.RWMutex
 }
 
 func newHub() *hub {
 	return &hub{
-		sessions:   make(map[*Session]bool),
+		sessions:   make(map[*Session]struct{}),
 		broadcast:  make(chan *envelope),
 		register:   make(chan *Session),
 		unregister: make(chan *Session),
 		exit:       make(chan *envelope),
-		open:       true,
-		rwmutex:    &sync.RWMutex{},
+		status:     StatusNormal,
+		rwMutex:    &sync.RWMutex{},
 	}
 }
 
 func (h *hub) run() {
-loop:
 	for {
 		select {
 		case s := <-h.register:
-			h.rwmutex.Lock()
-			h.sessions[s] = true
-			h.rwmutex.Unlock()
+			h.rwMutex.Lock()
+			h.sessions[s] = nodata
+			h.rwMutex.Unlock()
 		case s := <-h.unregister:
 			if _, ok := h.sessions[s]; ok {
-				h.rwmutex.Lock()
+				h.rwMutex.Lock()
 				delete(h.sessions, s)
-				h.rwmutex.Unlock()
+				h.rwMutex.Unlock()
 			}
 		case m := <-h.broadcast:
-			h.rwmutex.RLock()
+			h.rwMutex.RLock()
 			for s := range h.sessions {
 				if m.filter != nil {
 					if m.filter(s) {
@@ -51,30 +54,27 @@ loop:
 					s.writeMessage(m)
 				}
 			}
-			h.rwmutex.RUnlock()
+			h.rwMutex.RUnlock()
 		case m := <-h.exit:
-			h.rwmutex.Lock()
+			h.rwMutex.Lock()
 			for s := range h.sessions {
 				s.writeMessage(m)
 				delete(h.sessions, s)
 				s.Close()
 			}
-			h.open = false
-			h.rwmutex.Unlock()
-			break loop
+			atomic.StoreUint32(&h.status, StatusStop)
+			h.rwMutex.Unlock()
+			return
 		}
 	}
 }
 
 func (h *hub) closed() bool {
-	h.rwmutex.RLock()
-	defer h.rwmutex.RUnlock()
-	return !h.open
+	return atomic.LoadUint32(&h.status) == StatusStop
 }
 
 func (h *hub) len() int {
-	h.rwmutex.RLock()
-	defer h.rwmutex.RUnlock()
-
+	h.rwMutex.RLock()
+	defer h.rwMutex.RUnlock()
 	return len(h.sessions)
 }
