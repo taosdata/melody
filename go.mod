@@ -1,4 +1,4 @@
-module github.com/olahol/melody
+module github.com/huskar-t/melody
 
 go 1.14
 
