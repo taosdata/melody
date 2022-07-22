@@ -210,3 +210,11 @@ func (s *Session) MustGet(key string) interface{} {
 func (s *Session) IsClosed() bool {
 	return s.closed()
 }
+
+func (s *Session) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	return s.conn.WriteControl(messageType, data, deadline)
+}
+
+func (s *Session) GetConn() *websocket.Conn {
+	return s.conn
+}
