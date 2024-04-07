@@ -145,7 +145,7 @@ func (s *Session) setReadDeadline() {
 	now := time.Now()
 	if now.Sub(s.lastReadTime) >= time.Second {
 		s.lastReadTime = now
-		s.conn.SetReadDeadline(s.lastReadTime.Add(s.melody.Config.PongWait))
+		s.conn.SetReadDeadline(s.lastReadTime.Add(s.melody.Config.PongWait + s.melody.Config.PingPeriod))
 	}
 }
 
