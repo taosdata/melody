@@ -17,13 +17,14 @@ const (
 
 // Session wrapper around websocket connections.
 type Session struct {
-	Request *http.Request
-	Keys    sync.Map
-	conn    *websocket.Conn
-	output  chan *envelope
-	melody  *Melody
-	status  uint32
-	rwMutex *sync.RWMutex
+	Request      *http.Request
+	Keys         sync.Map
+	conn         *websocket.Conn
+	output       chan *envelope
+	melody       *Melody
+	status       uint32
+	rwMutex      *sync.RWMutex
+	lastReadTime time.Time
 }
 
 func (s *Session) writeMessage(message *envelope) {
@@ -108,10 +109,10 @@ func (s *Session) writePump() {
 
 func (s *Session) readPump() {
 	s.conn.SetReadLimit(s.melody.Config.MaxMessageSize)
-	s.conn.SetReadDeadline(time.Now().Add(s.melody.Config.PongWait))
+	s.setReadDeadline()
 
 	s.conn.SetPongHandler(func(string) error {
-		s.conn.SetReadDeadline(time.Now().Add(s.melody.Config.PongWait))
+		s.setReadDeadline()
 		s.melody.pongHandler(s)
 		return nil
 	})
@@ -129,7 +130,7 @@ func (s *Session) readPump() {
 			s.melody.errorHandler(s, err)
 			break
 		}
-
+		s.setReadDeadline()
 		if t == websocket.TextMessage {
 			s.melody.messageHandler(s, message)
 		}
@@ -137,6 +138,14 @@ func (s *Session) readPump() {
 		if t == websocket.BinaryMessage {
 			s.melody.messageHandlerBinary(s, message)
 		}
+	}
+}
+
+func (s *Session) setReadDeadline() {
+	now := time.Now()
+	if now.Sub(s.lastReadTime) >= time.Second {
+		s.lastReadTime = now
+		s.conn.SetReadDeadline(s.lastReadTime.Add(s.melody.Config.PongWait))
 	}
 }
 
