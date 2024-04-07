@@ -33,10 +33,11 @@ type Melody struct {
 // New creates a new melody instance with default UpGrader and Config.
 func New() *Melody {
 	upGrader := &websocket.Upgrader{
-		ReadBufferSize:  4096,
-		WriteBufferSize: 4096,
-		WriteBufferPool: &sync.Pool{},
-		CheckOrigin:     func(r *http.Request) bool { return true },
+		ReadBufferSize:    4096,
+		WriteBufferSize:   4096,
+		WriteBufferPool:   &sync.Pool{},
+		CheckOrigin:       func(r *http.Request) bool { return true },
+		EnableCompression: true,
 	}
 
 	hub := newHub()
