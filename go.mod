@@ -1,4 +1,4 @@
-module github.com/huskar-t/melody
+module github.com/taosdata/melody
 
 go 1.14
 
